@@ -1,0 +1,9 @@
+# Copy to `.dev.vars` for LOCAL development only (`.dev.vars` is git-ignored).
+# Production secrets are stored with `npx wrangler secret put NAME` and never in a file.
+WEBHOOK_SECRET=change-me-to-a-long-random-string
+BOT_TOKEN=123456:replace-with-token-from-botfather
+ALLOWED_USER_ID=123456789
+
+# Only when LLM_PROVIDER = "openai-compatible" (e.g. OpenRouter):
+# LLM_API_KEY=sk-...
+# and in wrangler.toml [vars]: LLM_BASE_URL = "https://openrouter.ai/api/v1"

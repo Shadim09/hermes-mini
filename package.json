@@ -1,0 +1,23 @@
+{
+  "name": "hermes-mini",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Serverless Persian task bot for Telegram on Cloudflare Workers + D1",
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "logs": "wrangler tail --format pretty",
+    "db:create": "wrangler d1 create hermes-mini-db",
+    "db:migrate:local": "wrangler d1 migrations apply hermes-mini-db --local",
+    "db:migrate:remote": "wrangler d1 migrations apply hermes-mini-db --remote",
+    "test": "node --test",
+    "mock": "node dev/mock-server.mjs",
+    "host": "node --no-warnings dev/node-host.mjs",
+    "e2e": "node dev/e2e.mjs"
+  },
+  "devDependencies": {
+    "wrangler": "^4"
+  },
+  "license": "MIT"
+}

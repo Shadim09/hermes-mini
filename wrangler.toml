@@ -1,0 +1,31 @@
+name = "hermes-mini"
+main = "src/index.js"
+compatibility_date = "2025-09-01"
+workers_dev = true
+
+# Live logs (`npm run logs`) and the dashboard's Observability tab
+[observability]
+enabled = true
+
+# Bonus: daily reminder. Runs at minute 30 of every hour (UTC). Tehran is UTC+03:30,
+# so that is exactly :00 in Tehran; the code sends only when Tehran hour == REMINDER_HOUR.
+# (The free plan allows 5 cron triggers per account; we use 1.)
+[triggers]
+crons = ["30 * * * *"]
+
+# Non-secret settings. Secrets are NOT here: see docs/GUIDE.md (wrangler secret put ...)
+[vars]
+LLM_PROVIDER = "workers-ai"
+LLM_MODEL = "@cf/google/gemma-4-26b-a4b-it"
+REMINDER_HOUR = "8"
+
+[ai]
+binding = "AI"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "hermes-mini-db"
+# Replace with the id printed by `npx wrangler d1 create hermes-mini-db`.
+# (A database id is an identifier, not a secret.)
+database_id = "PUT-YOUR-D1-DATABASE-ID-HERE"
+migrations_dir = "migrations"

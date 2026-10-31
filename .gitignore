@@ -1,0 +1,14 @@
+# secrets: NEVER commit these (course rule: a leaked token = zero for operations)
+.dev.vars
+.dev.vars.*
+!.dev.vars.example
+.env
+.env.*
+*.pem
+*.key
+
+# tooling
+node_modules/
+.wrangler/
+*.log
+.DS_Store
