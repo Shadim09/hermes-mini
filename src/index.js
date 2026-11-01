@@ -171,7 +171,10 @@ async function decide(text, tasks, history, today, env) {
 
     log("llm_invalid_output", { reason: parsed.error, attempt, sample: String(raw).slice(0, 200) });
     messages = messages.concat([
-      { role: "assistant", content: String(typeof raw === "string" ? raw : JSON.stringify(raw)).slice(0, 500) },
+      {
+        role: "assistant",
+        content: String(typeof raw === "string" ? raw : JSON.stringify(raw)).slice(0, 500) || "(empty output)",
+      },
       {
         role: "user",
         content: `Your previous output was invalid (${parsed.error}). Return ONLY one line of valid JSON that follows the allowed outputs.`,
@@ -293,15 +296,24 @@ function normalizeTarget(t) {
   return [...new Set(nums)].sort((a, b) => a - b);
 }
 
-async function callLLM(env, messages) {
+export async function callLLM(env, messages) {
   const provider = env.LLM_PROVIDER || "workers-ai";
   const model = env.LLM_MODEL || "@cf/google/gemma-4-26b-a4b-it";
 
   if (provider === "workers-ai") {
     if (!env.AI) throw new Error("AI binding is missing");
-    const out = await env.AI.run(model, { messages, max_tokens: 400, temperature: 0 });
+    // Gemma 4 is a reasoning model. Without this flag it can spend the whole token budget
+    // "thinking" and return content = null (this happened on ambiguous messages).
+    // The flag is documented for Gemma 4 only, so we send it only for that family.
+    const extra = /gemma-4/.test(model) ? { chat_template_kwargs: { enable_thinking: false } } : {};
+    const out = await env.AI.run(model, { messages, max_tokens: 500, temperature: 0, ...extra });
     const content = out?.response ?? out?.choices?.[0]?.message?.content ?? out?.result?.response;
-    if (content === undefined || content === null) throw new Error("empty Workers AI response");
+    if (content === undefined || content === null || content === "") {
+      // Not an exception: an empty answer is treated like any other invalid output,
+      // so decide() retries once and then falls back to the safe "I did not understand" reply.
+      log("llm_empty_output", { keys: Object.keys(out || {}), finish: out?.choices?.[0]?.finish_reason ?? null });
+      return "";
+    }
     return content; // string, or an already-parsed object (both handled by parseAction)
   }
 
