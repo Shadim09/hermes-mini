@@ -1,79 +1,140 @@
+🇬🇧 English · 🇮🇷 [فارسی](README.fa.md)
+
 # hermes-mini ☿
 
-ربات تلگرامِ **بدون سرور** برای مدیریت کارهای روزانه، با متن آزاد فارسی.
-پروژهٔ درس رایانش ابری — همه‌چیز روی پلن رایگان Cloudflare اجرا می‌شود.
+A **serverless Telegram bot** that manages your daily tasks from plain, free-form **Persian** text — no slash commands, no menus. A language model reads each message and picks exactly one action; everything runs on the **Cloudflare free plan** (Workers + D1 + Workers AI).
 
-```
-بخر شیر                → کار جدید ساخته می‌شود
-شیر رو خریدم           → کار انجام‌شده علامت می‌خورد
-چیه کارام؟             → لیست کارها
-حذف شماره ۲            → حذف
-سلام                   → پاسخ گفت‌وگویی
-```
+Built for the Cloud Computing course. Live instance: <https://hermes-mini.shadi-hermes.workers.dev> (`/health` returns a JSON status).
 
-هیچ دستور اسلشی (`/start` و …) وجود ندارد؛ فهمیدن پیام و انتخاب عمل، کارِ مدل زبانی است.
+## What it does
 
-## معماری در یک نگاه
+| You write (Persian) | Meaning | Bot action |
+|---|---|---|
+| `بخر شیر` | "buy milk" | Adds a task |
+| `شیر رو خریدم` | "I bought the milk" | Marks the task done |
+| `چیه کارام؟` | "what are my tasks?" | Lists tasks |
+| `شماره ۲ رو حذف کن` | "delete number 2" | Deletes a task |
+| `همه رو حذف کن` | "delete all" | Deletes all tasks |
+| `سلام` | "hello" | Friendly chat reply |
+
+Plus a **daily morning reminder** at 08:00 Tehran time (Cron Trigger) listing your open tasks.
+
+## How it works
 
 ```mermaid
 flowchart LR
-    U[کاربر - تلگرام] -->|پیام| T[Telegram Bot API]
+    U[User on Telegram] -->|message| T[Telegram Bot API]
     T -->|webhook + secret header| W[Cloudflare Worker<br/>src/index.js]
-    W -->|پرامپت + لیست کارها| L[LLM<br/>Workers AI]
-    L -->|یک خط JSON| W
-    W <-->|کارها، حافظهٔ گفتگو، dedupe| D[(D1)]
+    W -->|prompt + current tasks| L[LLM<br/>Workers AI]
+    L -->|one line of JSON| W
+    W <-->|tasks, chat memory, dedupe| D[(D1 / SQLite)]
     W -->|sendMessage| T
-    C[Cron Trigger<br/>هر ساعت :۳۰ UTC] --> W
+    C[Cron Trigger<br/>every hour at :30 UTC] --> W
 ```
 
-جزئیات و توجیه تصمیم‌ها: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)
+1. Telegram calls the Worker's webhook; the `X-Telegram-Bot-Api-Secret-Token` header is checked (wrong or missing → `403`).
+2. Only the single whitelisted user ID is served; anyone else is silently ignored.
+3. The Worker answers `200` immediately and does the real work in `ctx.waitUntil`, so Telegram never retries.
+4. The model receives the message, the last 6 chat turns and the current task list, and must return one JSON action: `add | done | undone | del | list | chat`.
+5. `parseAction()` validates the JSON (fixed action set, bounded sizes, integer ids). Invalid output → one retry → a safe fallback message, and **nothing is written to the database**.
+6. Duplicate Telegram deliveries are dropped via the `processed_updates` table.
 
-## ساختار پروژه
+More detail and the reasoning behind each decision: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) (Persian).
+
+## Tech stack
+
+- **Cloudflare Workers** — a single-file Worker (`src/index.js`), no framework
+- **Cloudflare D1** — tasks, conversation memory, processed update IDs; schema kept in `migrations/`
+- **Workers AI** — `@cf/google/gemma-4-26b-a4b-it` (reasoning disabled for fast, clean JSON)
+- **Cron Triggers** — daily reminder
+- **Wrangler 4** for deployment; **Node's built-in test runner** for tests
+
+## Project structure
 
 ```
-src/index.js              ← کل منطق (یک فایل Worker)
-migrations/0001_init.sql  ← جدول‌ها، جدا از کد
-wrangler.toml             ← تنظیمات deploy (بدون هیچ secret)
-test/                     ← تست واحد (npm test)
-dev/                      ← ابزار تست محلی: mock تلگرام/LLM + e2e
-scripts/                  ← set-webhook، webhook-info، check-secrets
-docs/                     ← راهنما، معماری، گزارش، دفاع، Bale، دردسرهای رایج
-CLAUDE.md, .claude/       ← زمینهٔ کار با هارنس هوش مصنوعی (Claude Code) و skill
+src/index.js              the whole Worker (webhook, LLM call, actions, cron)
+migrations/0001_init.sql  tables: tasks, messages, processed_updates
+wrangler.toml             deployment config (contains no secrets)
+test/                     unit tests (npm test)
+dev/                      local mock Telegram/LLM servers + end-to-end checks
+scripts/                  set-webhook, webhook-info, check-secrets
+docs/                     guide, architecture, pitfalls, report (Persian)
+CLAUDE.md, .claude/       context and skill for the AI coding harness
 ```
 
-## شروع سریع
+## Getting started
 
-راهنمای کامل و قدم‌به‌قدم (با مشخص‌کردن کارهایی که فقط خودت می‌توانی بکنی): **[`docs/GUIDE.md`](docs/GUIDE.md)**
+You need Node.js 20+, a free Cloudflare account, a Telegram bot token from [@BotFather](https://t.me/BotFather), and your numeric Telegram user ID. The full step-by-step walkthrough (Persian) is in [`docs/GUIDE.md`](docs/GUIDE.md); the short version:
 
 ```bash
 npm install
-npm test                 # تست واحد
-npm run mock &           # تلگرام و LLM تقلبی
-npm run host &           # اجرای همین Worker روی Node با دیتابیس موقت
-npm run e2e              # ۲۰ بررسی سرتاسری
+npx wrangler login
+npx wrangler d1 create hermes-mini-db        # copy the database_id into wrangler.toml
+npm run db:migrate:remote
+
+npx wrangler secret put BOT_TOKEN
+npx wrangler secret put WEBHOOK_SECRET       # any long random string
+npx wrangler secret put ALLOWED_USER_ID      # your numeric Telegram ID
+
+npm run deploy
+bash scripts/set-webhook.sh                  # points Telegram at your Worker
 ```
 
-## نگاشت نیازمندی‌ها به کد
+**Windows / PowerShell notes**
 
-| نیازمندی | کجا |
-|---|---|
-| R1 فقط متن آزاد فارسی | هیچ handler دستوری وجود ندارد؛ `processUpdate` همه چیز را به LLM می‌دهد |
-| R2 یک عمل از مجموعهٔ ثابت | `ACTIONS` و `execute()` در `src/index.js` |
-| R3 JSON ساخت‌یافته + اعتبارسنجی + مسیر امن | `parseAction()`، یک تلاش مجدد، سپس `MSG.fallback`؛ هیچ چیزی در DB نوشته نمی‌شود |
-| R4 حافظهٔ گفتگو | جدول `messages`، آخرین ۶ پیام در پرامپت |
-| R5 فقط یک کاربر | `ALLOWED_USER_ID` (secret)، رد بی‌صدا |
-| R6 webhook با secret | هدر `X-Telegram-Bot-Api-Secret-Token`، مقایسهٔ زمان‌ثابت، در غیر این صورت ۴۰۳ |
-| R7 ذخیره در D1 + migration جدا | `migrations/0001_init.sql` |
-| R8 فقط پلن رایگان | Workers + D1 + Workers AI؛ جدول محدودیت‌ها در `docs/ARCHITECTURE.md` |
-| امتیاز: یادآور صبحگاهی | `scheduled()` + Cron Trigger |
+- Use `curl.exe`, not `curl` (which is an alias for `Invoke-WebRequest`).
+- Telegram and `workers.dev` are filtered in some regions. With a VPN, pass its local proxy explicitly, e.g. `curl.exe --proxy http://127.0.0.1:<port> ...`.
+- Never paste tokens into chat or commit them; read them with `Read-Host` and clear them afterwards (`Remove-Item Env:BOT_TOKEN`).
 
-## امنیت
+## Configuration
 
-هیچ secret ای در ریپو نیست و نباید باشد. `BOT_TOKEN`، `WEBHOOK_SECRET`، `ALLOWED_USER_ID` (و در صورت استفاده `LLM_API_KEY`) فقط با
-`npx wrangler secret put` در secret store کلادفلر ذخیره می‌شوند. قبل از هر push این را اجرا کن:
+| Name | Kind | Purpose |
+|---|---|---|
+| `BOT_TOKEN` | secret | Telegram bot token |
+| `WEBHOOK_SECRET` | secret | Expected value of the webhook secret header |
+| `ALLOWED_USER_ID` | secret | The only Telegram user the bot responds to |
+| `LLM_PROVIDER`, `LLM_MODEL` | var (`wrangler.toml`) | Model backend (default: Workers AI) |
+| `REMINDER_HOUR` | var (`wrangler.toml`) | Tehran hour of the daily reminder (default `8`) |
+| `LLM_API_KEY` | secret (optional) | Only if you switch to an external LLM provider |
+
+## Security
+
+- No secrets in the repository — they live only in Cloudflare's secret store (`wrangler secret put`). Run `bash scripts/check-secrets.sh` before every push.
+- Webhook authenticated by secret header; single-user whitelist with silent rejection.
+- Model output is untrusted: it is validated before any write, and the error path writes nothing.
+- Deletes are soft (`deleted_at`), so mistakes are recoverable in D1.
+- If a token ever leaks, revoke it immediately in BotFather (`/revoke`).
+
+## Free-plan limits (checked against Cloudflare docs)
+
+| Resource | Free allowance | Relevance |
+|---|---|---|
+| Workers requests | 100,000 / day | One per Telegram message |
+| Worker CPU time | 10 ms / request | Work is I/O-bound, fits comfortably |
+| D1 | 5M reads and 100K writes / day, 5 GB | Far above single-user needs |
+| Workers AI | 10,000 neurons / day | The practical ceiling — ample for one user |
+
+## Testing
 
 ```bash
-bash scripts/check-secrets.sh
+npm test          # unit tests: parser, LLM wrapper, Tehran time, formatting
+npm run mock &    # fake Telegram + LLM
+npm run host &    # the same Worker running on Node with a temporary DB
+npm run e2e       # end-to-end scenarios, including LLM failure paths
 ```
 
-اگر توکنی به ریپو رفت: نمرهٔ بخش عملیات صفر می‌شود و **باید** توکن را در BotFather با `/revoke` باطل کنی.
+## Troubleshooting
+
+Common problems (wrong folder, TOML errors, Cloudflare error 10034, webhook timeouts behind a VPN, empty model responses) are documented in [`docs/PITFALLS.md`](docs/PITFALLS.md) (Persian).
+
+## Roadmap
+
+Undo for the last action, due dates with targeted reminders, voice messages via Whisper, and a Bale messenger variant ([`docs/BALE.md`](docs/BALE.md)).
+
+## AI-assisted development
+
+The project was built end to end with an AI coding harness (Claude Code) using project context (`CLAUDE.md`), a deploy skill and the Cloudflare MCP server. The workflow is described in [`docs/AI_WORKFLOW.md`](docs/AI_WORKFLOW.md).
+
+## Author
+
+Shadi Moradi — Cloud Computing course project.
