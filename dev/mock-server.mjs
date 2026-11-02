@@ -9,6 +9,7 @@ import http from "node:http";
 
 const PORT = Number(process.env.MOCK_PORT || 8790);
 const sent = []; // messages the bot "sent to Telegram"
+let voiceText = ""; // what the next downloaded "voice note" contains (the fake Whisper just decodes it)
 
 const faDigits = (s) => s.replace(/[۰-۹]/g, (d) => String("۰۱۲۳۴۵۶۷۸۹".indexOf(d)));
 
@@ -28,10 +29,25 @@ function brain(messages) {
   const tasks = parseTasks(system);
   const isRetry = messages.length > 2;
   const out = (o) => JSON.stringify(o);
+  const today = system.match(/Today \(Asia\/Tehran\): (\d{4}-\d{2}-\d{2})/)?.[1];
+  const calendar = [...system.matchAll(/^(\d{4}-\d{2}-\d{2}) = /gm)].map((m) => m[1]);
+  const hourMatch = text.match(/ساعت (\d+)/);
+  const hour = hourMatch ? Number(hourMatch[1]) : null;
+  const dayFor = (t) => (t.includes("پس‌فردا") ? calendar[2] : t.includes("فردا") ? calendar[1] : t.includes("امروز") ? today : null);
 
   if (text.includes("خراب")) return "this is not json at all"; // always broken -> fallback path
+  if (text.includes("تهی")) {
+    // empty first answer (like a reasoning model that ran out of tokens), valid on retry
+    return isRetry ? out({ action: "chat", reply: "بعد از خروجی خالی هم جواب دادم" }) : "";
+  }
   if (text.includes("نیمه")) {
     return isRetry ? out({ action: "chat", reply: "بعد از تلاش دوم جواب دادم" }) : "```oops``` {not json";
+  }
+  if (text.includes("برگردون")) return out({ action: "undo" });
+  if (text.includes("یادآور") && /شماره \d+/.test(text)) {
+    const n = Number(text.match(/شماره (\d+)/)[1]);
+    if (text.includes("بردار")) return out({ action: "remind", target: n, date: null });
+    return out({ action: "remind", target: n, date: dayFor(text), hour });
   }
   if (text.includes("حذف")) {
     if (text.includes("همه")) return out({ action: "del", target: "all" });
@@ -47,7 +63,11 @@ function brain(messages) {
       : out({ action: "chat", reply: "همچین کاری توی لیست پیدا نکردم." });
   }
   if (text.includes("چیه") || text.includes("لیست")) return out({ action: "list" });
-  if (text.includes("بخر") || text.includes("اضافه")) return out({ action: "add", items: [text] });
+  if (text.includes("بخر") || text.includes("اضافه")) {
+    const day = dayFor(text);
+    const item = text.replace(/(پس‌فردا|فردا|امروز)/g, "").replace(/ساعت \d+/g, "").replace(/\s+/g, " ").trim();
+    return out(day ? { action: "add", items: [item], due: { date: day, hour } } : { action: "add", items: [text] });
+  }
   if (text.includes("سلام")) return out({ action: "chat", reply: "سلام! چطور می‌تونم کمکت کنم؟" });
   return out({ action: "chat", reply: "نمی‌دونم چی بگم 🙂" });
 }
@@ -73,6 +93,17 @@ http
     if (req.method === "POST" && /\/bot[^/]*\/sendMessage$/.test(req.url)) {
       const body = JSON.parse((await readBody(req)) || "{}");
       sent.push({ chat_id: body.chat_id, text: body.text });
+      return send(200, { ok: true });
+    }
+    if (req.method === "POST" && /\/bot[^/]*\/getFile$/.test(req.url)) {
+      return send(200, { ok: true, result: { file_id: "x", file_path: "voice/note.oga" } });
+    }
+    if (req.method === "GET" && /^\/file\/bot[^/]*\/voice\/note\.oga$/.test(req.url)) {
+      res.writeHead(200, { "content-type": "audio/ogg" });
+      return res.end(Buffer.from(voiceText, "utf8"));
+    }
+    if (req.method === "POST" && req.url === "/__voice") {
+      voiceText = JSON.parse((await readBody(req)) || "{}").text ?? "";
       return send(200, { ok: true });
     }
     if (req.method === "GET" && req.url === "/__sent") return send(200, sent);

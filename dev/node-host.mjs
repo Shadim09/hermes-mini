@@ -75,6 +75,14 @@ const baseEnv = {
   LLM_API_KEY: "test",
   LLM_MODEL: "mock",
   BOT_API_BASE: mock,
+  // Fake Workers AI: only used for speech-to-text here (the LLM is the mock server). The mock
+  // "voice file" is just UTF-8 text, so decoding the base64 audio back to text plays Whisper.
+  AI: {
+    run: async (model, input) => {
+      if (!/whisper/.test(model)) throw new Error(`unexpected AI model in test host: ${model}`);
+      return { text: Buffer.from(input.audio, "base64").toString("utf8") };
+    },
+  },
 };
 
 http
@@ -87,8 +95,15 @@ http
     const url = `http://127.0.0.1:${PORT}${req.url}`;
 
     // test-only: trigger the cron handler as if it were exactly the reminder hour
-    if (req.url === "/__cron") {
-      await worker.scheduled({}, { ...baseEnv, REMINDER_HOUR: String(tehranHour()) }, ctx);
+    if (req.url.startsWith("/__cron")) {
+      // /__cron            -> as if it were exactly the daily reminder hour right now
+      // /__cron?at=<ISO>   -> as if the cron tick fired at that instant (default REMINDER_HOUR 8)
+      const at = new URL(url).searchParams.get("at");
+      if (at) {
+        await worker.scheduled({ scheduledTime: Date.parse(at) }, { ...baseEnv, REMINDER_HOUR: "8" }, ctx);
+      } else {
+        await worker.scheduled({}, { ...baseEnv, REMINDER_HOUR: String(tehranHour()) }, ctx);
+      }
       await Promise.all(pending);
       res.writeHead(200).end("cron done");
       return;

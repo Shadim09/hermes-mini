@@ -16,8 +16,11 @@ Built for the Cloud Computing course. Live instance: <https://hermes-mini.shadi-
 | `شماره ۲ رو حذف کن` | "delete number 2" | Deletes a task |
 | `همه رو حذف کن` | "delete all" | Deletes all tasks |
 | `سلام` | "hello" | Friendly chat reply |
+| `فردا ساعت ۹ به مادرم زنگ بزنم` | "call my mother tomorrow at 9" | Adds a task with a reminder |
+| `برگردون` | "undo" | Reverts the last change |
+| 🎙 a voice note | | Transcribed with Whisper, then handled like text |
 
-Plus a **daily morning reminder** at 08:00 Tehran time (Cron Trigger) listing your open tasks.
+Plus a **daily morning reminder** at 08:00 Tehran time and **per-task reminders** (date and optional hour, hourly Cron Trigger). Details: [`docs/FEATURES.md`](docs/FEATURES.md) (Persian).
 
 ## How it works
 
@@ -35,7 +38,7 @@ flowchart LR
 1. Telegram calls the Worker's webhook; the `X-Telegram-Bot-Api-Secret-Token` header is checked (wrong or missing → `403`).
 2. Only the single whitelisted user ID is served; anyone else is silently ignored.
 3. The Worker answers `200` immediately and does the real work in `ctx.waitUntil`, so Telegram never retries.
-4. The model receives the message, the last 6 chat turns and the current task list, and must return one JSON action: `add | done | undone | del | list | chat`.
+4. The model receives the message, the last 6 chat turns, the current task list and a 30-day calendar table, and must return one JSON action: `add | done | undone | del | list | remind | undo | chat`. Voice notes are first transcribed with Whisper (Workers AI).
 5. `parseAction()` validates the JSON (fixed action set, bounded sizes, integer ids). Invalid output → one retry → a safe fallback message, and **nothing is written to the database**.
 6. Duplicate Telegram deliveries are dropped via the `processed_updates` table.
 
@@ -53,7 +56,7 @@ More detail and the reasoning behind each decision: [`docs/ARCHITECTURE.md`](doc
 
 ```
 src/index.js              the whole Worker (webhook, LLM call, actions, cron)
-migrations/0001_init.sql  tables: tasks, messages, processed_updates
+migrations/               0001 tables; 0002 due dates + undo journal
 wrangler.toml             deployment config (contains no secrets)
 test/                     unit tests (npm test)
 dev/                      local mock Telegram/LLM servers + end-to-end checks
@@ -70,7 +73,7 @@ You need Node.js 20+, a free Cloudflare account, a Telegram bot token from [@Bot
 npm install
 npx wrangler login
 npx wrangler d1 create hermes-mini-db        # copy the database_id into wrangler.toml
-npm run db:migrate:remote
+npm run db:migrate:remote                    # applies migrations/0001 and 0002
 
 npx wrangler secret put BOT_TOKEN
 npx wrangler secret put WEBHOOK_SECRET       # any long random string
@@ -94,7 +97,8 @@ bash scripts/set-webhook.sh                  # points Telegram at your Worker
 | `WEBHOOK_SECRET` | secret | Expected value of the webhook secret header |
 | `ALLOWED_USER_ID` | secret | The only Telegram user the bot responds to |
 | `LLM_PROVIDER`, `LLM_MODEL` | var (`wrangler.toml`) | Model backend (default: Workers AI) |
-| `REMINDER_HOUR` | var (`wrangler.toml`) | Tehran hour of the daily reminder (default `8`) |
+| `REMINDER_HOUR` | var (`wrangler.toml`) | Tehran hour of the daily reminder, and of reminders that have a day but no hour (default `8`) |
+| `STT_MODEL` | var (`wrangler.toml`) | Speech-to-text model for voice notes (default Whisper large-v3-turbo) |
 | `LLM_API_KEY` | secret (optional) | Only if you switch to an external LLM provider |
 
 ## Security
@@ -117,7 +121,7 @@ bash scripts/set-webhook.sh                  # points Telegram at your Worker
 ## Testing
 
 ```bash
-npm test          # unit tests: parser, LLM wrapper, Tehran time, formatting
+npm test          # 22 unit tests: parser, due dates, Whisper wrapper, Tehran time, formatting
 npm run mock &    # fake Telegram + LLM
 npm run host &    # the same Worker running on Node with a temporary DB
 npm run e2e       # end-to-end scenarios, including LLM failure paths
@@ -129,7 +133,7 @@ Common problems (wrong folder, TOML errors, Cloudflare error 10034, webhook time
 
 ## Roadmap
 
-Undo for the last action, due dates with targeted reminders, voice messages via Whisper, and a Bale messenger variant ([`docs/BALE.md`](docs/BALE.md)).
+Recurring tasks, minute-level reminders (needs a faster cron), and a Bale messenger variant ([`docs/BALE.md`](docs/BALE.md)). Undo, due-date reminders and voice notes are already implemented.
 
 ## AI-assisted development
 
